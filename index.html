@@ -1,0 +1,229 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secret Signal</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101827;color:#fff;font-family:Arial,sans-serif}
+header{padding:22px;background:#182438;border-bottom:1px solid #344158}
+header h2{margin:0;color:#66e0bd}
+header p{margin:7px 0 0;color:#aab6c9;font-size:13px}
+main{max-width:650px;margin:auto;padding:20px}
+.card{background:#1c2a40;padding:22px;border-radius:16px;margin-top:35px}
+input{width:100%;padding:15px;margin:9px 0;border:1px solid #43536d;border-radius:10px;background:#101827;color:white;font-size:16px}
+button{padding:14px 20px;border:0;border-radius:10px;background:#38cda6;color:#10251f;font-weight:bold;font-size:16px;cursor:pointer}
+button:disabled{opacity:.5}
+#login button{width:100%;margin-top:12px}
+#chat{display:none}
+#messages{height:55vh;min-height:300px;overflow-y:auto;padding:12px;background:#101827;border-radius:12px;margin:15px 0}
+.msg{max-width:85%;padding:12px;margin:9px 0;border-radius:12px;background:#293950;overflow-wrap:anywhere}
+.msg.own{margin-left:auto;background:#176c5c}
+.sender{font-size:11px;color:#a8e8d5;margin-bottom:6px}
+.time{font-size:10px;color:#b5c3d0;margin-top:7px}
+.send{display:flex;gap:8px}
+.send input{flex:1;min-width:0}
+#status{color:#b9c8d9;font-size:13px;white-space:pre-wrap}
+.small{color:#aab6c9;font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+<h2>✦ Secret Signal</h2>
+<p>Private messaging · Secure connection</p>
+</header>
+
+<main>
+<section id="login" class="card">
+<h2>Вход в Secret Signal</h2>
+<p class="small">Войди под одним из двух разрешённых аккаунтов.</p>
+<form id="loginForm">
+<input id="email" type="email" placeholder="Email" required>
+<input id="password" type="password" placeholder="Пароль" required>
+<button type="submit">Войти</button>
+</form>
+<p id="loginStatus"></p>
+</section>
+
+<section id="chat">
+<div style="display:flex;justify-content:space-between;align-items:center">
+<div>
+<h3>Личная переписка</h3>
+<p class="small" id="currentUser"></p>
+</div>
+<button id="logout" type="button">Выйти</button>
+</div>
+
+<div id="messages">
+<p class="small">Загрузка сообщений...</p>
+</div>
+
+<form id="sendForm" class="send">
+<input id="messageInput" maxlength="4000"
+placeholder="Напиши сообщение..." autocomplete="off" required>
+<button type="submit" id="sendButton">➤</button>
+</form>
+<p id="status"></p>
+</section>
+</main>
+
+<script type="module">
+import { initializeApp } from
+"https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+
+import {
+getAuth, signInWithEmailAndPassword,
+onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+import {
+getFirestore, collection, addDoc, query,
+orderBy, limitToLast, onSnapshot, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAnLolGC9LEXPVhT5KvBy_ZSWuvXJ4-BY4",
+  authDomain: "first-4dd97.firebaseapp.com",
+  projectId: "first-4dd97",
+  storageBucket: "first-4dd97.firebasestorage.app",
+  messagingSenderId: "191679880612",
+  appId: "1:191679880612:web:c79b28bb6f6449cb76b531",
+  measurementId: "G-22274B7XRZ"
+};
+
+const allowedEmails = [
+  "kareymatvey@gmail.com",
+  "doncrok@yandex.ru"
+];
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const login = document.getElementById("login");
+const chat = document.getElementById("chat");
+const messages = document.getElementById("messages");
+const status = document.getElementById("status");
+
+let unsubscribeMessages = null;
+
+document.getElementById("loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+
+  const email = document.getElementById("email").value.trim().toLowerCase();
+  const password = document.getElementById("password").value;
+  const output = document.getElementById("loginStatus");
+
+  if (!allowedEmails.includes(email)) {
+    output.textContent = "Этот аккаунт не разрешён.";
+    return;
+  }
+
+  output.textContent = "Выполняется вход...";
+
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+  } catch (error) {
+    output.textContent = "Ошибка входа: " + error.message;
+  }
+});
+
+onAuthStateChanged(auth, user => {
+  if (unsubscribeMessages) {
+    unsubscribeMessages();
+    unsubscribeMessages = null;
+  }
+
+  if (!user) {
+    login.style.display = "block";
+    chat.style.display = "none";
+    return;
+  }
+
+  if (!allowedEmails.includes(user.email.toLowerCase())) {
+    signOut(auth);
+    return;
+  }
+
+  login.style.display = "none";
+  chat.style.display = "block";
+  document.getElementById("currentUser").textContent = user.email;
+
+  const q = query(
+    collection(db, "messages"),
+    orderBy("createdAt", "asc"),
+    limitToLast(100)
+  );
+
+  unsubscribeMessages = onSnapshot(q, snapshot => {
+    messages.replaceChildren();
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+
+      const bubble = document.createElement("div");
+      bubble.className = "msg" +
+        (data.senderEmail === user.email ? " own" : "");
+
+      const sender = document.createElement("div");
+      sender.className = "sender";
+      sender.textContent = data.senderEmail || "Пользователь";
+
+      const text = document.createElement("div");
+      text.textContent = data.text || "";
+
+      const time = document.createElement("div");
+      time.className = "time";
+      time.textContent = data.createdAt
+        ? data.createdAt.toDate().toLocaleString("ru-RU")
+        : "Отправка...";
+
+      bubble.append(sender, text, time);
+      messages.appendChild(bubble);
+    });
+
+    messages.scrollTop = messages.scrollHeight;
+    status.textContent = "";
+  }, error => {
+    status.textContent = "Ошибка загрузки: " + error.message;
+  });
+});
+
+document.getElementById("sendForm").addEventListener("submit", async e => {
+  e.preventDefault();
+
+  const user = auth.currentUser;
+  const input = document.getElementById("messageInput");
+  const button = document.getElementById("sendButton");
+  const text = input.value.trim();
+
+  if (!user || !text) return;
+
+  button.disabled = true;
+
+  try {
+    await addDoc(collection(db, "messages"), {
+      text: text,
+      senderEmail: user.email,
+      createdAt: serverTimestamp()
+    });
+
+    input.value = "";
+    status.textContent = "";
+  } catch (error) {
+    status.textContent = "Не удалось отправить: " + error.message;
+  } finally {
+    button.disabled = false;
+    input.focus();
+  }
+});
+
+document.getElementById("logout").addEventListener("click", () => {
+  signOut(auth);
+});
+</script>
+</body>
+</html>
